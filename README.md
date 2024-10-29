@@ -1,223 +1,243 @@
-# JWT EXAMPLE
-JWT and TypeScript with Express, following the structure and steps you've outlined. This example includes user registration, login, password hashing, token generation, and route protection.
+# Json Web Token 'JWT' Example
 
-### Project Setup
+Here is a simple complete code example for a sign-up and sign-in functionality using Node.js, Express, TypeScript, MongoDB, and JWT for authentication. This example assumes you have already set up your environment as described in the previous guide.
 
-1. **Initialize a new TypeScript project**:
-   ```bash
-   mkdir jwt-auth-example
-   cd jwt-auth-example
-   npm init -y
-   npm install express mongoose bcrypt jsonwebtoken dotenv @types/express @types/mongoose @types/bcrypt @types/jsonwebtoken typescript ts-node nodemon
-   npx tsc --init
-   ```
+### 1. Project Structure
 
-2. **Create the project structure**:
-   ```
-   jwt-auth-example/
-   ├── src/
-   │   ├── controllers/
-   │   │   └── user.controller.ts
-   │   ├── middleware/
-   │   │   └── auth.ts
-   │   ├── models/
-   │   │   └── user.model.ts
-   │   ├── routes/
-   │   │   └── user.routes.ts
-   │   ├── services/
-   │   │   └── user.service.ts
-   │   ├── utils/
-   │   │   └── errors.util.ts
-   │   ├── app.ts
-   │   └── config.ts
-   └── package.json
-   ```
-
-### Code Implementation
-
-#### 1. **Configuration (config.ts)**
-
-```typescript
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-export const SECRET_KEY = process.env.SECRET_KEY || 'your-secret-key-here';
-export const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/jwt-auth-example';
+```
+/my-api
+|-- /src
+|   |-- /controllers
+|   |   |-- authController.ts
+|   |-- /models
+|   |   |-- User.ts
+|   |-- /routes
+|   |   |-- authRoutes.ts
+|   |-- /middleware
+|   |   |-- authMiddleware.ts
+|   |-- app.ts
+|-- package.json
+|-- tsconfig.json
 ```
 
-#### 2. **User Model (models/user.model.ts)**
+### 2. Install Required Packages
+
+Run the following command to install the necessary packages:
+
+```bash
+npm install express mongoose jsonwebtoken bcryptjs dotenv
+npm install --save-dev typescript @types/node @types/express @types/mongoose @types/jsonwebtoken @types/bcryptjs
+```
+
+### 3. Create TypeScript Configuration
+
+Create a `tsconfig.json` file in the root of your project:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "commonjs",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
+```
+
+### 4. Create User Model
+
+Create a file `src/models/User.ts`:
 
 ```typescript
-import mongoose from 'mongoose';
-import bcrypt from 'bcrypt';
+import mongoose, { Document, Schema } from 'mongoose';
 
-export interface IUserDocument extends mongoose.Document {
-    name: string;
-    password: string;
+export interface IUser extends Document {
+  username: string;
+  password: string;
 }
 
-const UserSchema = new mongoose.Schema<IUserDocument>({
-    name: { type: String, unique: true },
-    password: { type: String },
+const UserSchema: Schema = new Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
 });
 
-// Hash password before saving
-UserSchema.pre('save', async function (next) {
-    const user = this;
-    if (user.isModified('password')) {
-        user.password = await bcrypt.hash(user.password, 8);
-    }
-    next();
-});
-
-const UserModel = mongoose.model<IUserDocument>('User', UserSchema);
-export default UserModel;
+export const User = mongoose.model<IUser>('User', UserSchema);
 ```
 
-#### 3. **User Service (services/user.service.ts)**
+### 5. Create Authentication Controller
 
-```typescript
-import { DocumentDefinition } from 'mongoose';
-import UserModel, { IUserDocument } from '../models/user.model';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import { SECRET_KEY } from '../config';
-
-export async function register(user: DocumentDefinition<IUserDocument>): Promise<void> {
-    await UserModel.create(user);
-}
-
-export async function login(user: DocumentDefinition<IUserDocument>) {
-    const foundUser = await UserModel.findOne({ name: user.name });
-    if (!foundUser) throw new Error('User not found');
-
-    const isMatch = await bcrypt.compare(user.password, foundUser.password);
-    if (!isMatch) throw new Error('Invalid password');
-
-    const token = jwt.sign({ _id: foundUser._id, name: foundUser.name }, SECRET_KEY, { expiresIn: '2d' });
-    return { user: { _id: foundUser._id, name: foundUser.name }, token };
-}
-```
-
-#### 4. **User Controller (controllers/user.controller.ts)**
+Create a file `src/controllers/authController.ts`:
 
 ```typescript
 import { Request, Response } from 'express';
-import * as userService from '../services/user.service';
-import { getErrorMessage } from '../utils/errors.util';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { User } from '../models/User';
 
-export const registerOne = async (req: Request, res: Response) => {
-    try {
-        await userService.register(req.body);
-        res.status(201).send('User registered successfully');
-    } catch (error) {
-        res.status(500).send(getErrorMessage(error));
-    }
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+
+export const signUp = async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({ username, password: hashedPassword });
+    await newUser.save();
+    res.status(201).json({ message: 'User created successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error creating user', error });
+  }
 };
 
-export const loginOne = async (req: Request, res: Response) => {
-    try {
-        const foundUser = await userService.login(req.body);
-        res.status(200).send(foundUser);
-    } catch (error) {
-        res.status(500).send(getErrorMessage(error));
+export const signIn = async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
-};
-```
 
-#### 5. **Error Utility (utils/errors.util.ts)**
-
-```typescript
-export function getErrorMessage(error: unknown) {
-    if (error instanceof Error) return error.message;
-    return String(error);
-}
-```
-
-#### 6. **Authentication Middleware (middleware/auth.ts)**
-
-```typescript
-import jwt, { Secret, JwtPayload } from 'jsonwebtoken';
-import { Request, Response, NextFunction } from 'express';
-import { SECRET_KEY } from '../config';
-
-export interface CustomRequest extends Request {
-    token: string | JwtPayload;
-}
-
-export const auth = (req: Request, res: Response, next: NextFunction) => {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return res.status(401).send('Please authenticate');
-
-    try {
-        const decoded = jwt.verify(token, SECRET_KEY);
-        (req as CustomRequest).token = decoded;
-        next();
-    } catch (err) {
-        res.status(401).send('Invalid token');
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
+
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '1h' });
+    res.json({ token });
+  } catch (error) {
+    res.status(500).json({ message: 'Error signing in', error });
+  }
 };
 ```
 
-#### 7. **User Routes (routes/user.routes.ts)**
+### 6. Create Authentication Routes
+
+Create a file `src/routes/authRoutes.ts`:
 
 ```typescript
 import { Router } from 'express';
-import * as userController from '../controllers/user.controller';
-import { auth } from '../middleware/auth';
+import { signUp, signIn } from '../controllers/authController';
 
 const router = Router();
 
-router.post('/register', userController.registerOne);
-router.post('/login', userController.loginOne);
-router.get('/protected', auth, (req, res) => {
-    res.send('This is a protected route');
-});
+router.post('/signup', signUp);
+router.post('/signin', signIn);
 
 export default router;
 ```
 
-#### 8. **Main Application (app.ts)**
+### 7. Create Middleware for Authentication
+
+Create a file `src/middleware/authMiddleware.ts`:
+
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+
+export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    req.userId = (decoded as any).id; // Attach user ID to request
+    next();
+  });
+};
+```
+
+### 8. Create the Main Application File
+
+Create a file `src/app.ts`:
 
 ```typescript
 import express from 'express';
 import mongoose from 'mongoose';
-import userRoutes from './routes/user.routes';
-import { MONGO_URI } from './config';
+import dotenv from 'dotenv';
+import authRoutes from './routes/authRoutes';
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('MongoDB connected'))
-    .catch(err => console.error('MongoDB connection error:', err));
+const PORT = process.env.PORT || 5000;
 
-app.use('/api/users', userRoutes);
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/myapi', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
 
-const PORT = process.env.PORT || 8080;
+// Use authentication routes
+app.use('/api/auth', authRoutes);
+
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
 ```
 
-### Running the Application
+### 9. Environment Variables
 
-1. **Set up environment variables** in a `.env` file:
-   ```
-   SECRET_KEY=your-secret-key-here
-   MONGO_URI=mongodb://localhost:27017/jwt-auth-example
-   ```
+Create a `.env` file in the root of your project:
 
-2. **Run the application**:
-   ```bash
-   npx ts-node src/app.ts
-   ```
+```
+MONGODB_URI=mongodb://localhost:27017/myapi
+JWT_SECRET=your_jwt_secret
+```
 
-### Testing the Application
+### 10. Running the Application
 
-You can use Postman or any API testing tool to test the following endpoints:
+1. Compile TypeScript to JavaScript:
 
-- **Register a user**: `POST /api/users/register` with body `{ "name": "John Doe", "password": "yourpassword" }`
-- **Login a user**: `POST /api/users/login` with body `{ "name": "John Doe", "password": "yourpassword" }`
-- **Access protected route**: `GET /api/users/protected` with `Authorization: Bearer <your_token>` in headers.
+```bash
+npx tsc
+```
+
+2. Start the server:
+
+```bash
+node dist/app.js
+```
+
+### 11. Testing the API
+
+You can use tools like Postman or cURL to test the API.
+
+- **Sign Up:**
+  - **POST** `http://localhost:5000/api/auth/signup`
+  - **Body:**
+    ```json
+    {
+      "username": "testuser",
+      "password": "password123"
+    }
+    ```
+
+- **Sign In:**
+  - **POST** `http://localhost:5000/api/auth/signin`
+  - **Body:**
+    ```json
+    {
+      "username": "testuser",
+      "password": "password123"
+    }
+    ```
+
+### Summary
+
+In this guide, we created a simple REST API for user authentication using Node.js, Express, TypeScript, MongoDB, and JWT. We set up user sign-up and sign-in functionalities, hashed passwords, and generated JWTs for secure authentication. This foundational setup can be expanded with additional features and security measures as needed.
